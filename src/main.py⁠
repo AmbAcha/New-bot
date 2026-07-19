@@ -1,0 +1,106 @@
+import asyncio
+import os
+import logging
+from dotenv import load_dotenv
+
+# Import our custom resilience, communication, and notification layers
+from resilient_orchestrator import FaultTolerantScanner, FaultTolerantNotifier
+from lead_communicator import RecoveryOutreachEngine
+
+# Initialize environment configurations
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+logger = logging.getLogger("MasterOrchestrator")
+
+class LegacyRecoveryBot:
+    def __init__(self):
+        # Load active environment tokens
+        self.eth_rpc = os.getenv("ETH_RPC_URL", "https://cloudflare-eth.com")
+        self.bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        self.channel_id = os.getenv("TELEGRAM_CHANNEL_ID", "@DE_HUNTER_ALERTS")
+        self.email_token = os.getenv("POSTMARK_SERVER_TOKEN")
+
+        # Initialize engine modules
+        self.scanner = FaultTolerantScanner(eth_rpc_url=self.eth_rpc)
+        self.notifier = FaultTolerantNotifier(bot_token=self.bot_token, channel_id=self.channel_id)
+        self.outreach = RecoveryOutreachEngine(eth_rpc_url=self.eth_rpc, postmark_server_token=self.email_token)
+
+    async def process_target_wallet(self, client_name: str, wallet_address: str):
+        """
+        Orchestrates the entire detection, enrichment, and outreach funnel 
+        for a specific target address.
+        """
+        logger.info(f"🟢 Starting audit pipeline for client: {client_name} ({wallet_address})")
+
+        try:
+            # 1. On-Chain Scan Layer (Protected by Tenacity retry logic)
+            checksum_addr = self.scanner.w3.to_checksum_address(wallet_address)
+            balance = await asyncio.to_thread(self.scanner.fetch_evm_balance_safely, checksum_addr)
+            
+            # 2. Check for asset threshold viability (e.g., only act if balance > 0)
+            if balance > 0.0:
+                logger.warning(f"💰 Viable balance located! Balance: {balance} ETH")
+
+                # 3. Telegram Broadcast Notification (Protected against rate limits)
+                wallet_payload = {
+                    "network": "Ethereum Mainnet",
+                    "address": wallet_address,
+                    "balance": balance
+                }
+                await self.notifier.dispatch_wallet_update_alert(client_name, wallet_payload)
+
+                # 4. Identity Enrichment & Lead Generation Layer
+                ens_domain = await asyncio.to_thread(self.outreach.reverse_ens_lookup, wallet_address)
+                
+                if ens_domain:
+                    # Simulation of data aggregation matching domain to contact cards
+                    simulated_email = f"holder@{ens_domain.replace('.eth', '.com')}"
+                    logger.info(f"💡 Discovered email candidate via Web3 domain parsing: {simulated_email}")
+
+                    # 5. Automated Outreach Execution via Email Gateway
+                    asset_summary = f"Dormant balance of {balance:.4f} ETH detected on Ethereum Mainnet."
+                    email_dispatched = await self.outreach.send_recovery_proposal(
+                        target_email=simulated_email,
+                        owner_name=client_name,
+                        asset_summary=asset_summary
+                    )
+                    
+                    if email_dispatched:
+                        logger.info("📩 Recovery outreach proposal successfully dispatched to lead.")
+                else:
+                    logger.info("ℹ️ No reverse ENS record mapped to this address. Skipping direct email step.")
+            else:
+                logger.info(f"🔍 Wallet balance is empty. Standing down tracking triggers.")
+
+        except Exception as e:
+            logger.error(f"❌ Pipeline collapsed for {wallet_address} due to unexpected error: {str(e)}")
+
+    async def start_monitoring_loop(self):
+        """
+        The continuous operational heart of the system.
+        """
+        # Array of target profiles to scan (in production, loaded dynamically from PostgreSQL)
+        target_vault = [
+            {"name": "Jane Smith", "wallet": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"},
+            {"name": "Alpha Holder", "wallet": "0x00000000219ab540356cBB839Cbe05303d7705Fa"}
+        ]
+
+        logger.info("🚀 Legacy Asset Recovery System online and actively listening...")
+        
+        while True:
+            for target in target_vault:
+                await self.process_target_wallet(target["name"], target["wallet"])
+                # Safe operational buffer between address checks to prevent IP throttling
+                await asyncio.sleep(5)
+            
+            # Deep system cooling pause before restarting the scanning grid
+            logger.info("💤 Cycle complete. Entering 1-hour system cooling block.")
+            await asyncio.sleep(3600)
+
+if __name__ == "__main__":
+    bot = LegacyRecoveryBot()
+    asyncio.run(bot.start_monitoring_loop())
