@@ -1,0 +1,65 @@
+import logging
+from datetime import datetime, timezone
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("NotifierFormatter")
+
+class TelegramAlertFormatter:
+    """
+    Handles the structural layout and Markdown parsing safety 
+    for the Legacy Recovery Engine telemetry.
+    """
+    
+    @staticmethod
+    def escape_markdown_v2(text: str) -> str:
+        """
+        Escapes reserved characters required by Telegram's strict MarkdownV2 parser.
+        Failing to escape these characters causes the Telegram API to return an HTTP 400.
+        """
+        reserved_chars = r'_*[]()~`>#+-=|{}.!'
+        return ''.join(f'\\{c}' if c in reserved_chars else c for c in str(text))
+
+    def format_unclaimed_asset_alert(self, client_name: str, asset_data: dict) -> str:
+        """
+        Compiles an executive-grade alert string for discovered off-chain property or cash.
+        """
+        timestamp_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        
+        # Extract variables securely
+        source = asset_data.get('source_registry', 'Unknown Registry')
+        ref_id = asset_data.get('reference_id', 'N/A')
+        amount = asset_data.get('claim_amount', 0.0)
+        
+        # Assemble string with strict control token escaping
+        alert_body = (
+            f"🔍 *🚨 ASSET RECOVERY ALERT 🚨*\n\n"
+            f"• *Client:* {self.escape_markdown_v2(client_name)}\n"
+            f"• *Registry:* {self.escape_markdown_v2(source)}\n"
+            f"• *Ref ID:* `{self.escape_markdown_v2(ref_id)}`\n"
+            f"• *Value:* `${self.escape_markdown_v2(f'{amount:,.2f}')}`\n\n"
+            f"⚡ *Status:* Sync Completed \\| System Ready for Retrieval\\.\n"
+            f"🕒 _{self.escape_markdown_v2(timestamp_str)}_"
+        )
+        return alert_body
+
+    def format_wallet_update_alert(self, client_name: str, wallet_data: dict) -> str:
+        """
+        Compiles a ledger tracking notification for on-chain balances.
+        """
+        timestamp_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        
+        network = wallet_data.get("network", "Unknown Network")
+        addr = wallet_data.get("address", "0x0")
+        masked_address = f"{addr[:6]}...{addr[-4:]}" if len(addr) > 10 else addr
+        balance = wallet_data.get("balance", 0.0)
+        
+        alert_body = (
+            f"⛓️ *🌐 ON-CHAIN LEDGER SYNC 🌐*\n\n"
+            f"• *Profile:* {self.escape_markdown_v2(client_name)}\n"
+            f"• *Network:* {self.escape_markdown_v2(network)}\n"
+            f"• *Address:* `{self.escape_markdown_v2(masked_address)}`\n"
+            f"• *Current Balance:* `{self.escape_markdown_v2(f'{balance:.4f}')}` ETH\n\n"
+            f"🔔 *Audit Log:* Ledger state verified without integrity faults\\.\n"
+            f"🕒 _{self.escape_markdown_v2(timestamp_str)}_"
+        )
+        return alert_body
